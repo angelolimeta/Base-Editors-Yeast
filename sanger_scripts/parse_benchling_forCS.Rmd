@@ -1,0 +1,392 @@
+---
+title: "Parse benchling alignments from CS"
+author: "Angelo Limeta"
+date: "09/08/2021"
+output:
+  html_document:
+    df_print: kable
+    toc: true
+    toc_float: true
+---
+
+
+# Load libraries
+```{r}
+library(tidyverse)
+library(tidysq)
+
+slice = dplyr::slice
+rename = dplyr::rename
+```
+
+# Load data
+```{r}
+primer_1 <- read_fasta(file_name = "../data/benchling/Primer_1.fasta")
+primer_2 <- read_fasta(file_name = "../data/benchling/Primer_2.fasta")
+```
+
+
+# Pre-processing
+
+Process names / sequences
+```{r}
+# Store reference
+reference_1 = primer_1 %>% filter(name == "CAN1") %>% pull(sq) %>% as.character()
+reference_2 = primer_2 %>% filter(name == "CAN1") %>% pull(sq) %>% as.character()
+
+# Change from sq to character
+primer_1 <- primer_1 %>% mutate(seq = as.character(sq)) %>% select(-sq)
+primer_2 <- primer_2 %>% mutate(seq = as.character(sq)) %>% select(-sq)
+
+# Remove reference and edit names
+primer_1 <- 
+  primer_1 %>% 
+  filter(name != "CAN1") %>% 
+  mutate(name = gsub(" \\(.*","",name))
+
+primer_2 <- 
+  primer_2 %>% 
+  filter(name != "CAN1") %>% 
+  mutate(name = gsub(" \\(.*","",name))
+
+primer_1
+primer_2
+```
+
+Remove indels in reference and edit positions in the reference accordingly
+```{r}
+# construct tibble containing each reference base and position
+tbl_ref1 <- tibble(.rows = nchar(reference_1),letter = NA, pos = NA)
+tbl_ref2 <- tibble(.rows = nchar(reference_2),letter = NA, pos = NA)
+
+
+for (i in 1:nchar(reference_1)) {
+  tbl_ref1$letter[i] <- substr(reference_1, start = i, stop = i)
+  tbl_ref1$pos[i] <- i
+}
+
+for (i in 1:nchar(reference_2)) {
+  tbl_ref2$letter[i] <- substr(reference_2,start = i, stop = i)
+  tbl_ref2$pos[i] <- i
+}
+
+# extract correct position for each reference
+tbl_ref1_new <- 
+  tbl_ref1 %>% 
+  filter(letter != "-") %>% 
+  mutate(pos_new = 1:nrow(.))
+
+tbl_ref2_new <- 
+  tbl_ref2 %>% 
+  filter(letter != "-") %>% 
+  mutate(pos_new = 1:nrow(.))
+
+# Add new position without indels to reference tibble
+tbl_ref1 <- 
+  tbl_ref1 %>% 
+  full_join(tbl_ref1_new, by = c("pos","letter")) %>% 
+  rename(ref = letter) %>% 
+  rename(position = pos)
+
+tbl_ref2 <- 
+  tbl_ref2 %>% 
+  full_join(tbl_ref2_new, by = c("pos","letter")) %>% 
+  rename(ref = letter,
+         position = pos)
+```
+
+Load data if already run
+```{r}
+primer_1_long <- readRDS("../data/benchling/primer_1_long.rds")
+primer_2_long <- readRDS("../data/benchling/primer_2_long.rds")
+```
+
+Check length of both references to see if they match
+```{r}
+tbl_ref1 %>% filter(ref != "-") %>% nrow()
+tbl_ref2 %>% filter(ref != "-") %>% nrow()
+```
+
+Remove indels from reference
+```{r}
+primer_1_noindel <- 
+  primer_1_long %>% 
+  filter(!is.na(pos_new)) %>% 
+  select(-position) %>% 
+  rename(pos = pos_new)
+
+primer_2_noindel <- 
+  primer_2_long %>% 
+  filter(!is.na(pos_new)) %>% 
+  select(-position) %>% 
+  rename(pos = pos_new)
+```
+
+Merge data sets
+```{r}
+primer_1_noindel <- primer_1_noindel %>% mutate(primer = "primer1")
+primer_2_noindel <- primer_2_noindel %>% mutate(primer = "primer2")
+
+tbl_full <- bind_rows(primer_1_noindel,primer_2_noindel)
+```
+
+Remove uncalled bases
+```{r}
+tbl_full <- 
+  tbl_full %>% 
+  filter(alt != "N")
+```
+
+Add mutation type and sample metadata
+```{r}
+tbl_full <- 
+  tbl_full %>% 
+  mutate(mutated = ifelse(ref == alt, 0,1)) %>% 
+  mutate(mut_type = ifelse(ref == alt, "no_mut",paste0(ref,"->",alt))) %>% 
+  mutate(primer = ifelse(grepl("corr",sample),"primer_2","primer_1")) %>% # add primer
+  mutate(grna = gsub("_.*","",sample)) %>% # add gRNA
+  mutate(colony = str_replace_all(sample, "^([^_]+)_([^_]+).*","\\2")) # add colony ID
+head(tbl_full)
+```
+Delete crappy sequencing runs
+```{r}
+# WT
+# B03_corr
+# B05_corr
+# B02_corr
+# A07_corr
+# A01 wh
+# A08 wh
+
+tbl_full <- 
+  tbl_full %>% 
+  filter(!(sample %in% c("WT_B03_B03-can_rv_corr",
+                         "WT_B05_B05-can_rv_corr",
+                         "WT_B02_B02-can_rv_corr",
+                         "WT_A07_A07-can_rv_corr",
+                         "WT_A08_can_wh_rv",
+                         "WT_A01_can_wh_rv"))) %>% 
+  filter(!is.na(sample))
+```
+
+Calculate number of samples
+```{r}
+tbl_samples <- 
+  tbl_full %>% select(sample,grna,primer) %>% distinct() %>% group_by(grna,primer) %>% summarise(no_samples = length(sample))
+tbl_samples
+```
+
+Remove indels and keep SNPs only
+```{r}
+tbl_long_mut <- tbl_full %>% filter(alt != "-") %>% filter(mutated == 1)
+```
+
+
+Plot results
+```{r}
+
+# Pooled primers
+tbl_long_mut %>% 
+  ggplot(aes(x = pos,y = mutated, fill = grna,color = grna)) +
+  geom_col() +
+  facet_wrap(vars(grna)) +
+  theme_bw() +
+  xlab("position") +
+  ylab("number of mutated bases")
+
+# Facet by primer and grna
+tbl_long_mut %>% 
+  ggplot(aes(x = pos,y = mutated, fill = grna,color = grna)) +
+  geom_col() +
+  facet_grid(grna ~ primer) +
+  theme_bw() +
+  xlab("position") +
+  ylab("number of mutated bases") +
+  xlim(c(750,850))
+
+tbl_long_mut %>% 
+  ggplot(aes(x = pos,y = mutated, fill = grna,color = grna)) +
+  geom_col() +
+  facet_grid(grna ~ primer) +
+  theme_bw() +
+  xlab("position") +
+  ylab("number of mutated bases")
+
+# Color by mutation type
+tbl_long_mut %>% 
+  ggplot(aes(x = pos,y = mutated, fill = mut_type,color = mut_type)) +
+  geom_col() +
+  facet_wrap(vars(grna)) +
+  theme_bw() +
+  xlab("position") +
+  ylab("number of mutated bases")
+```
+Filter out low quality regions
+```{r}
+tbl_long_mut <- 
+  tbl_long_mut %>% 
+  filter(!(primer == "primer_1" & pos < 740)) %>% 
+  filter(!(primer == "primer_2" & pos >= 740))
+```
+
+Re-do plot
+```{r}
+tbl_long_mut %>% 
+  ggplot(aes(x = pos,y = mutated, fill = grna,color = grna)) +
+  geom_col() +
+  facet_grid(grna ~ primer) +
+  theme_bw() +
+  xlab("position") +
+  ylab("number of mutated bases")
+```
+
+Normalize by number of samples
+```{r}
+tbl_long_mut <- 
+  tbl_long_mut %>% 
+  full_join(tbl_samples, by = c("grna","primer"))
+
+tbl_long_mut %>% 
+  group_by(grna,primer,pos) %>% 
+  mutate(perc_alt = 100*length(alt)/no_samples) %>% 
+  ungroup() %>%
+  select(grna,primer,pos,perc_alt) %>% 
+  distinct() %>% 
+  mutate(grna = case_when(
+    grna == "WT" ~ "WT",
+    grna == "g7" ~ "gRNA1",
+    grna == "2x" ~ "gRNA1+2",
+    grna == "3x" ~ "gRNA1+2+3",
+  )) %>% 
+  mutate(grna = factor(grna,levels = c("gRNA1+2+3","gRNA1+2","gRNA1","WT"),ordered = T)) %>% 
+  ggplot(aes(x = pos,y = perc_alt, fill = grna,color = grna)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(vars(grna),ncol = 1) +
+  theme_bw() +
+  xlab("Position on CAN1") +
+  ylab("% mutated bases") +
+  scale_color_brewer(palette = "Set1") +
+  theme(legend.position = "None",
+        aspect.ratio = 0.2)
+
+  
+```
+
+Color by mutated base
+```{r,fig.width=5,fig.height=3}
+tbl_long_mut %>% 
+  group_by(grna,primer,pos) %>% 
+  mutate(perc_alt = 100*length(alt)/no_samples) %>% 
+  ungroup() %>%
+  select(grna,primer,ref,pos,perc_alt) %>% 
+  distinct() %>% 
+  mutate(grna = factor(grna,levels = c("3x","2x","g7","WT"),ordered = T)) %>% 
+  ggplot(aes(x = pos,y = perc_alt,color = ref)) +
+  geom_point() +
+  facet_wrap(vars(grna),ncol = 1) +
+  theme_bw() +
+  xlab("Position on CAN1 (bp)") +
+  ylab("% mutated bases") +
+  scale_color_brewer(palette = "Set1") +
+  theme(legend.position = "bottom",
+        aspect.ratio = 0.1) +
+  labs(colour="Reference base")
+```
+
+Color by mutated base and add gRNA positions
+```{r,fig.width=8,fig.height=5}
+tbl_long_mut %>% 
+  group_by(grna,primer,pos) %>% 
+  mutate(perc_alt = 100*length(alt)/no_samples) %>% 
+  ungroup() %>%
+  select(grna,primer,ref,pos,perc_alt) %>% 
+  distinct() %>% 
+  mutate(grna = case_when(
+    grna == "WT" ~ "WT",
+    grna == "g7" ~ "gRNA1",
+    grna == "2x" ~ "gRNA1+2",
+    grna == "3x" ~ "gRNA1+2+3",
+  )) %>% 
+  mutate(grna = factor(grna,levels = c("gRNA1+2+3","gRNA1+2","gRNA1","WT"),ordered = T)) %>% 
+  mutate(SITE1 = case_when(
+    grna == "WT" ~ "-",
+    grna == "gRNA1" ~ "A",
+    grna == "gRNA1+2" ~ "A",
+    grna == "gRNA1+2+3" ~ "A",
+  )) %>% 
+    mutate(SITE2 = case_when(
+    grna == "WT" ~ "-",
+    grna == "gRNA1" ~ "-",
+    grna == "gRNA1+2" ~ "A",
+    grna == "gRNA1+2+3" ~ "A",
+  )) %>% 
+      mutate(SITE3 = case_when(
+    grna == "WT" ~ "-",
+    grna == "gRNA1" ~ "-",
+    grna == "gRNA1+2" ~ "-",
+    grna == "gRNA1+2+3" ~ "A",
+  )) %>% 
+  ggplot(aes(x = pos,y = perc_alt,color = ref)) +
+  geom_rect(data = data.frame(SITE1 = "A"), aes(xmin = 108, xmax = 110, ymin = -Inf, ymax = Inf), alpha=1, fill="black", inherit.aes = F) +
+  geom_rect(data = data.frame(SITE1 = "A"), aes(xmin = 89, xmax = 129, ymin = -Inf, ymax = Inf), alpha=0.1, fill="black", inherit.aes = F) +
+  geom_rect(data = data.frame(SITE2 = "A"), aes(xmin = 767, xmax = 769, ymin = -Inf, ymax = Inf), alpha=1, fill="black", inherit.aes = F) +
+  geom_rect(data = data.frame(SITE2 = "A"), aes(xmin = 748, xmax = 788, ymin = -Inf, ymax = Inf), alpha=0.1, fill="black", inherit.aes = F) +
+  geom_rect(data = data.frame(SITE3 = "A"), aes(xmin = 806, xmax = 808, ymin = -Inf, ymax = Inf), alpha=1, fill="black", inherit.aes = F) +
+  geom_rect(data = data.frame(SITE3 = "A"), aes(xmin = 787, xmax = 827, ymin = -Inf, ymax = Inf), alpha=0.1, fill="black", inherit.aes = F) +
+  geom_point() +
+  facet_wrap(vars(grna),ncol = 1) +
+  theme_bw() +
+  xlab("Position on CAN1 (bp)") +
+  ylab("% mutated bases") +
+  scale_color_brewer(palette = "Set1") +
+  theme(legend.position = "bottom",
+        aspect.ratio = 0.1) +
+  labs(colour="Reference base")
+```
+
+```{r}
+yarrow = 50
+
+tbl_long_mut %>% 
+  group_by(grna,primer,pos) %>% 
+  mutate(perc_alt = 100*length(alt)/no_samples) %>% 
+  ungroup() %>%
+  select(grna,primer,ref,pos,perc_alt) %>% 
+  distinct() %>% 
+  mutate(grna = case_when(
+    grna == "WT" ~ "WT",
+    grna == "g7" ~ "gRNA1",
+    grna == "2x" ~ "gRNA1+2",
+    grna == "3x" ~ "gRNA1+2+3",
+  )) %>% 
+  mutate(grna = factor(grna,levels = c("gRNA1+2+3","gRNA1+2","gRNA1","WT"),ordered = T)) %>% 
+  ggplot(aes(x = pos,y = perc_alt,color = ref)) +
+  #gRNA1 annotation
+  geom_rect(data = data.frame(grna = factor(c("gRNA1","gRNA1+2","gRNA1+2+3"),levels = c("gRNA1+2+3","gRNA1+2","gRNA1","WT"),ordered = T)), aes(xmin = 108, xmax = 110, ymin = -Inf, ymax = Inf), alpha=1, fill="black", inherit.aes = F) +
+  geom_rect(data = data.frame(grna = factor(c("gRNA1","gRNA1+2","gRNA1+2+3"),levels = c("gRNA1+2+3","gRNA1+2","gRNA1","WT"),ordered = T)), aes(xmin = 89, xmax = 129, ymin = -Inf, ymax = Inf), alpha=0.1, fill="black", inherit.aes = F) +
+  #gRNA2 annotation
+  geom_rect(data = data.frame(grna = factor(c("gRNA1+2","gRNA1+2+3"),levels = c("gRNA1+2+3","gRNA1+2","gRNA1","WT"),ordered = T)), aes(xmin = 767, xmax = 769, ymin = -Inf, ymax = Inf), alpha=1, fill="black", inherit.aes = F) +
+  geom_rect(data = data.frame(grna = factor(c("gRNA1+2","gRNA1+2+3"),levels = c("gRNA1+2+3","gRNA1+2","gRNA1","WT"),ordered = T)), aes(xmin = 748, xmax = 788, ymin = -Inf, ymax = Inf), alpha=0.1, fill="black", inherit.aes = F) +
+  #gRNA3 annotation
+  geom_rect(data = data.frame(grna = factor(c("gRNA1+2+3"),levels = c("gRNA1+2+3","gRNA1+2","gRNA1","WT"),ordered = T)), aes(xmin = 806, xmax = 808, ymin = -Inf, ymax = Inf), alpha=1, fill="black", inherit.aes = F) + 
+  geom_rect(data = data.frame(grna = factor(c("gRNA1+2+3"),levels = c("gRNA1+2+3","gRNA1+2","gRNA1","WT"),ordered = T)), aes(xmin = 787, xmax = 827, ymin = -Inf, ymax = Inf), alpha=0.1, fill="black", inherit.aes = F) +
+  geom_point() +
+  facet_wrap(vars(grna),ncol = 1) +
+  theme_bw() +
+  xlab("Position on CAN1 (bp)") +
+  ylab("% mutated bases") +
+  scale_color_brewer(palette = "Set1") +
+  ylim(0,50)+
+  theme(legend.position = "bottom",
+        aspect.ratio = 0.1) +
+  labs(colour="Reference base")
+```
+
+
+Save data
+```{r}
+saveRDS(primer_1_long,file = "../data/benchling/primer_1_long.rds")
+saveRDS(primer_2_long,file = "../data/benchling/primer_2_long.rds")
+```
+
+
