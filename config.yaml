@@ -1,5 +1,5 @@
 paths:
-  raw_reads: /path/to/Yeast_mutator_analysis/NGS_data/ # Edit this path
+  raw_reads: /path/to/Yeast_mutator_analysis/NGS_reads/ # Edit this path
   template: /path/to/Yeast_mutator_analysis/template/ # Edit this path
 # !!! 
 # MAKE SURE PATHS END WITH /
