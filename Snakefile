@@ -4,7 +4,7 @@ import os
 import glob
 
 # Edit this path
-SAMPLES = "/path/to/Yeast_mutator_analysis/NGS_data/*"
+SAMPLES = "/path/to/Base-Editors-Yeast/NGS_data/*"
 SAMPLES = sorted([os.path.splitext(val)[0] for val in (glob.glob(SAMPLES))]) #Remove .gz from filename path
 SAMPLES = [os.path.splitext(val)[0] for val in SAMPLES]
 SAMPLES = [os.path.basename(val) for val in SAMPLES]
