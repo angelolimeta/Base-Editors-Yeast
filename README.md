@@ -2,17 +2,19 @@
  
 This repository contains scripts and data for analysis of sequencing data from **Skrekas et al. 2022**.
 
-- Last update: 2022-02-02
+- Last update: 2022-02-03
 
 This repository is administered by Angelo Limeta (@angelolimeta), Division of Systems and Synthetic Biology, Department of Biology and Biological Engineering, Chalmers University of Technology.
 
 ### NGS data processing and analysis
 
-Illumina reads from the mutagenesis experiments have been processed through a Snakemake based pipeline in order to tally up rare variants.
+Illumina reads from the mutagenesis experiments have been processed through a [Snakemake](https://snakemake.github.io/) based pipeline in order to detect and tally up rare variants.
 In brief, the pipeline consists of the following steps:
 - Merging of perfectly complimentary paired-end reads using [NGmerge](https://github.com/jsh58/NGmerge)
 - Alignment to reference using the burrows-wheeler aligner
 - Ultradeep pileup of reads using BCFtools
+
+The pipeline can be run locally on a computer with enough RAM / storage. The pileup step is the most resource intensive and time consuming. When running the pipeline on a 2018 MacBook Pro (16Gb RAM, 2,3 GHz Quad-Core Intel Core i5) it took approximately 2-3h in order to fully process the data included in this repository.
 
 **How to re-run the pipeline:**
 
@@ -25,14 +27,14 @@ conda env create -f environment.yml
 conda activate BE-VCF
 ```
 
-Modify the paths in the **Snakefile** and Snakemake config file (**config.yaml**).
+Modify the paths for the data (raw Illumina reads) and template sequence files in the **Snakefile** and Snakemake config file (**config.yaml**).
 
 Run the pipeline:
 ```bash
 nohup snakemake &
 ```
 
-The pipeline should produce an output file of detected variants in VCF format.
+The pipeline wiil produce an output file of detected variants across samples in VCF format.
 
 **Analysis scripts**
 
