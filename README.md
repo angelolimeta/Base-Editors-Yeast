@@ -2,7 +2,7 @@
  
 This repository contains scripts and data for analysis of sequencing data from **Skrekas et al. 2022**.
 
-- Last update: 2022-02-03
+- Last update: 2022-02-14
 
 This repository is administered by Angelo Limeta (@angelolimeta), Division of Systems and Synthetic Biology, Department of Biology and Biological Engineering, Chalmers University of Technology.
 
@@ -29,8 +29,9 @@ conda activate BE-VCF
 
 Modify the paths for the data (raw Illumina reads) and template sequence files in the **Snakefile** and Snakemake config file (**config.yaml**).
 
-Run the pipeline:
+Navigate to the directory containing the files and run the pipeline:
 ```bash
+cd /path/to/Base-Editors-Yeast
 nohup snakemake &
 ```
 
